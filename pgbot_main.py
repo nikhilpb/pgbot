@@ -1,5 +1,8 @@
+import argparse
 from bs4 import BeautifulSoup as BS
 import numpy as np
+from os import listdir
+from os.path import isfile, join
 import requests
 # import spacy
 import random
@@ -11,12 +14,20 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 
+parser = argparse.ArgumentParser(
+                    prog = 'pgbot',
+                    description = 'Attempted bot based on Paul Graham essays.')
+parser.add_argument('--fetch_essay_pages', action=argparse.BooleanOptionalAction)
+parser.add_argument('--write_to_files', action=argparse.BooleanOptionalAction)
+
 BASE_URL = 'http://www.paulgraham.com/'
 ARTICLES_URL = BASE_URL + 'articles.html'
 PAGES = 'pages/'
 PAGE_MIN_SIZE = 1000
+ARGS = parser.parse_args()
 
-def fetch_essay_pages(write_to_files = False):
+
+def fetch_essay_pages():
     response = requests.get(ARTICLES_URL)
     if response.status_code == 200:
         print('Fetched the articles page.')
@@ -51,7 +62,7 @@ def fetch_essay_pages(write_to_files = False):
             failure = failure + 1
     print(f'total_success: {success}, total_failure: {failure}')
     print(f'Approximately {float(sum([len(t) for t in all_pages])) / (1024 * 1024):.2f} MB of data fetched')
-    if write_to_files:
+    if ARGS.write_to_files:
         count = 1
         for p in all_pages:
             with open(PAGES + 'page-' + str(count) + '.txt', 'w') as f:
@@ -59,8 +70,21 @@ def fetch_essay_pages(write_to_files = False):
                 count = count + 1
     return all_pages
 
+def load_essay_pages():
+    all_pages = []
+    for p in listdir(PAGES):
+        path = join(PAGES, p)
+        if isfile(path):
+            with open(path, 'r') as f:
+                all_pages.append(f.read())
+    return all_pages
+
 
 if __name__ == "__main__":
     print('Running pgbot.')
-    all_pages = fetch_essay_pages(write_to_files=True)
-    print('Done.')
+    all_pages = []
+    if ARGS.fetch_essay_pages:
+        all_pages = fetch_essay_pages()
+    else:
+        all_pages = load_essay_pages()
+    print(len(all_pages))
