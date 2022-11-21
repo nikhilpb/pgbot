@@ -14,35 +14,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-
-parser = argparse.ArgumentParser(
-                    prog = 'pgbot',
-                    description = 'Attempted bot based on Paul Graham essays.')
-parser.add_argument('--fetch_essay_pages', action=argparse.BooleanOptionalAction)
-parser.add_argument('--write_to_files', action=argparse.BooleanOptionalAction)
-parser.add_argument('--load_essay_pages', action=argparse.BooleanOptionalAction)
-parser.add_argument('--train_model', action=argparse.BooleanOptionalAction)
-parser.add_argument('--load_model', action=argparse.BooleanOptionalAction)
-parser.add_argument('--validate_model', action=argparse.BooleanOptionalAction)
-parser.add_argument('--generate_sentence', action=argparse.BooleanOptionalAction)
-
 BASE_URL = 'http://www.paulgraham.com/'
 ARTICLES_URL = BASE_URL + 'articles.html'
 PAGES = 'pages/'
 PAGE_MIN_SIZE = 1000
-ARGS = parser.parse_args()
 MAX_TOKENS = 2000
-EMBED_SIZE = 20
+EMBED_SIZE = 10
 HIDDEN_LAYER_SIZE = 128
 CONTEXT_SIZE = 3
 EPOCHS = 10
 
-MINUS_3 = '<-3>'
-MINUS_2 = '<-2>'
-MINUS_1 = '<-1>'
+START = '<start>'
 END = '<end>'
 
-def _fetch_essay_pages():
+def fetch_essay_pages():
     response = requests.get(ARTICLES_URL)
     if response.status_code == 200:
         print('Fetched the articles page.')
@@ -76,15 +61,14 @@ def _fetch_essay_pages():
         else: 
             failure = failure + 1
     print(f'total_success: {success}, total_failure: {failure}')
-    if ARGS.write_to_files:
-        count = 1
-        for p in all_pages:
-            with open(PAGES + 'page-' + str(count) + '.txt', 'w') as f:
-                f.write(p)
-                count = count + 1
+    count = 1
+    for p in all_pages:
+        with open(PAGES + 'page-' + str(count) + '.txt', 'w') as f:
+            f.write(p)
+            count = count + 1
     return all_pages
 
-def _load_essay_pages():
+def load_essay_pages():
     all_pages = []
     for p in listdir(PAGES):
         path = join(PAGES, p)
@@ -99,19 +83,19 @@ def _yield_tokens(essays):
             yield s.split()
 
 def _tokensize(sentence):
-    tokens = [MINUS_3, MINUS_2, MINUS_1]
+    tokens = [START, START, START]
     tokens.extend(sentence.split())
-    tokens.append('<end>')
+    tokens.append(END)
     return tokens
 
 def _make_ngrams(tokens):
     return [([tokens[i - j - 1] for j in range(CONTEXT_SIZE)], tokens[i]) for i in range(CONTEXT_SIZE, len(tokens))]
 
-def _get_ngrams(essays):
+def generate_ngrams(essays):
     vocab = build_vocab_from_iterator(
         _yield_tokens(essays), 
         max_tokens=MAX_TOKENS, 
-        specials=['<unk>', MINUS_3, MINUS_2, MINUS_1, END])
+        specials=['<unk>', START, END])
     vocab.set_default_index(0)
     sentances = [s for p in essays for s in p.split('\n') if len(s.split(' ')) > 3]
     tokenized_sentences = [_tokensize(s) for s in sentances]
@@ -161,7 +145,7 @@ def _train_model(ngrams, vocab, model, loss_function, optimizer):
                 print(f'{steps} steps done.')
                 print(f'avg_loss: {mean(losses[-999:]):.2f}')
 
-def _run_validation(ngrams, vocab, model, loss_function, optimizer):
+def calculate_loss(ngrams, vocab, model, loss_function):
     losses = []
     steps = 0
     model.zero_grad()
@@ -172,9 +156,9 @@ def _run_validation(ngrams, vocab, model, loss_function, optimizer):
     return mean(losses)        
 
 
-def _generate_sentence(model, vocab, max_length=50):
+def generate_sentence(model, vocab, max_length=50):
     sentence = []
-    input = [MINUS_1, MINUS_2, MINUS_3]
+    input = [START, START, START]
     nt = ''
     while (len(sentence) < max_length) and (nt != END):    
         indexes = torch.tensor(vocab(input), dtype=torch.long).view(1, 3)
@@ -184,29 +168,30 @@ def _generate_sentence(model, vocab, max_length=50):
         while ind == 0:
             ind = d.sample()
         nt = vocab.lookup_token(ind)
-        sentence.append(nt)
+        if nt != END:
+            sentence.append(nt)
         input = [nt] + input[:-1]
-    return ' '.join(sentence) + '.'
+    return ' '.join(sentence)
 
 
 
 
 def main():
-    print('Running pgbot.')
     all_pages = []
     if ARGS.fetch_essay_pages:
-        all_pages = _fetch_essay_pages()
+        all_pages = fetch_essay_pages()
     elif ARGS.load_essay_pages:
-        all_pages = _load_essay_pages()
+        all_pages = load_essay_pages()
     else:
         print('Neither fetch nor load chosen.')
-    (ngrams_train, ngrams_valid, ngrams_test), vocab = _get_ngrams(all_pages)
+        return
+    (ngrams_train, ngrams_valid, ngrams_test), vocab = generate_ngrams(all_pages)
 
     losses = []
     loss_function = nn.NLLLoss()
     model = NGramLanguageModeler(len(vocab), EMBED_SIZE, CONTEXT_SIZE)
     optimizer = optim.SGD(model.parameters(), lr=0.1)
-    model_path = 'models/ngram-model-4'
+    model_path = 'models/ngram-model'
 
     if ARGS.train_model:
         _train_model(ngrams_train, vocab, model, loss_function, optimizer)
@@ -216,12 +201,24 @@ def main():
         model.load_state_dict(torch.load(model_path))
     
     if ARGS.validate_model:
-        valid_loss = _run_validation(ngrams_valid, vocab, model, loss_function, optimizer)
+        valid_loss = calculate_loss(ngrams_valid, vocab, model, loss_function)
         print(f'validation_loss: {valid_loss:.2f}')
 
     if ARGS.generate_sentence:
         for i in range(20):
-            print(_generate_sentence(model, vocab))
+            print(generate_sentence(model, vocab))
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+                    prog = 'pgbot',
+                    description = 'Attempted bot based on Paul Graham essays.')
+    parser.add_argument('--fetch_essay_pages', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--write_to_files', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--load_essay_pages', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--train_model', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--load_model', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--validate_model', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--generate_sentence', action=argparse.BooleanOptionalAction)
+    ARGS = parser.parse_args()
+
     main()
