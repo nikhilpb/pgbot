@@ -1,3 +1,5 @@
+import ngram_model
+
 import argparse
 from bs4 import BeautifulSoup as BS
 import numpy as np
@@ -26,6 +28,8 @@ EPOCHS = 10
 
 START = '<start>'
 END = '<end>'
+UNK = '<unk>'
+
 
 def fetch_essay_pages():
     response = requests.get(ARTICLES_URL)
@@ -48,17 +52,19 @@ def fetch_essay_pages():
         finished_requests = finished_requests + 1
         rs = requests.get(link)
         if finished_requests % 10 == 0:
-            print(f'Finished {finished_requests} out of {total_requests} requests')
+            print(
+                f'Finished {finished_requests} out of {total_requests} requests')
         if rs.status_code == 200:
             success = success + 1
             pg_text = BS(rs.text, features="lxml").find('table').text
-            pg_text = pg_text.replace("'", "").replace('\r', ' ').replace('\n', ' ')
+            pg_text = pg_text.replace("'", "").replace(
+                '\r', ' ').replace('\n', ' ')
             pg_text = re.sub('e\.g\.', 'eg', pg_text)
             pg_text = re.sub('\.', '.\n', pg_text)
             if len(pg_text) < PAGE_MIN_SIZE:
                 continue
             all_pages.append(pg_text)
-        else: 
+        else:
             failure = failure + 1
     print(f'total_success: {success}, total_failure: {failure}')
     count = 1
@@ -67,6 +73,7 @@ def fetch_essay_pages():
             f.write(p)
             count = count + 1
     return all_pages
+
 
 def load_essay_pages():
     all_pages = []
@@ -77,10 +84,12 @@ def load_essay_pages():
                 all_pages.append(f.read())
     return all_pages
 
+
 def _yield_tokens(essays):
     for e in essays:
         for s in e.split('\n'):
             yield s.split()
+
 
 def _tokensize(sentence):
     tokens = [START, START, START]
@@ -88,16 +97,19 @@ def _tokensize(sentence):
     tokens.append(END)
     return tokens
 
+
 def _make_ngrams(tokens):
     return [([tokens[i - j - 1] for j in range(CONTEXT_SIZE)], tokens[i]) for i in range(CONTEXT_SIZE, len(tokens))]
 
+
 def generate_ngrams(essays):
     vocab = build_vocab_from_iterator(
-        _yield_tokens(essays), 
-        max_tokens=MAX_TOKENS, 
-        specials=['<unk>', START, END])
+        _yield_tokens(essays),
+        max_tokens=MAX_TOKENS,
+        specials=[UNK, START, END])
     vocab.set_default_index(0)
-    sentances = [s for p in essays for s in p.split('\n') if len(s.split(' ')) > 3]
+    sentances = [s for p in essays for s in p.split(
+        '\n') if len(s.split(' ')) > 3]
     tokenized_sentences = [_tokensize(s) for s in sentances]
     ngrams = [_make_ngrams(ts) for ts in tokenized_sentences]
     n1 = int(0.8 * len(ngrams))
@@ -107,26 +119,12 @@ def generate_ngrams(essays):
     ngrams_test = ngrams[n2:]
     return (ngrams_train, ngrams_valid, ngrams_test), vocab
 
+
 def _map_ngram_to_index(ng, vocab):
     X = torch.tensor([vocab(n[0]) for n in ng], dtype=torch.long)
     y = torch.tensor([vocab[n[1]] for n in ng], dtype=torch.long)
     return X, y
-    
-# Setup NN model
-class NGramLanguageModeler(nn.Module):
 
-    def __init__(self, vocab_size, embedding_dim, context_size):
-        super(NGramLanguageModeler, self).__init__()
-        self.embeddings = nn.Embedding(vocab_size, embedding_dim)
-        self.linear1 = nn.Linear(context_size * embedding_dim, HIDDEN_LAYER_SIZE)
-        self.linear2 = nn.Linear(HIDDEN_LAYER_SIZE, vocab_size)
-
-    def forward(self, inputs):
-        embeds = self.embeddings(inputs).view((inputs.shape[0], -1))
-        out = F.relu(self.linear1(embeds))
-        out = self.linear2(out)
-        log_probs = F.log_softmax(out, dim=1)
-        return log_probs
 
 def _train_model(ngrams, vocab, model, loss_function, optimizer):
     losses = []
@@ -145,6 +143,7 @@ def _train_model(ngrams, vocab, model, loss_function, optimizer):
                 print(f'{steps} steps done.')
                 print(f'avg_loss: {mean(losses[-999:]):.2f}')
 
+
 def calculate_loss(ngrams, vocab, model, loss_function):
     losses = []
     steps = 0
@@ -153,15 +152,16 @@ def calculate_loss(ngrams, vocab, model, loss_function):
         X, y = _map_ngram_to_index(ng, vocab)
         loss = loss_function(model(X), y)
         losses.append(loss.item())
-    return mean(losses)        
+    return mean(losses)
 
 
 def generate_sentence(model, vocab, max_length=50):
     sentence = []
     input = [START] * CONTEXT_SIZE
     nt = ''
-    while (len(sentence) < max_length) and (nt != END):    
-        indexes = torch.tensor(vocab(input), dtype=torch.long).view(1, CONTEXT_SIZE)
+    while (len(sentence) < max_length) and (nt != END):
+        indexes = torch.tensor(
+            vocab(input), dtype=torch.long).view(1, CONTEXT_SIZE)
         log_probs = model(indexes)
         d = torch.distributions.categorical.Categorical(logits=log_probs)
         ind = 0
@@ -172,8 +172,6 @@ def generate_sentence(model, vocab, max_length=50):
             sentence.append(nt)
         input = [nt] + input[:-1]
     return ' '.join(sentence)
-
-
 
 
 def main():
@@ -189,7 +187,8 @@ def main():
 
     losses = []
     loss_function = nn.NLLLoss()
-    model = NGramLanguageModeler(len(vocab), EMBED_SIZE, CONTEXT_SIZE)
+    model = ngram_model.NGramLanguageModeler(
+        len(vocab), EMBED_SIZE, HIDDEN_LAYER_SIZE, CONTEXT_SIZE)
     optimizer = optim.SGD(model.parameters(), lr=0.1)
     model_path = 'models/' + ARGS.model_name
 
@@ -199,7 +198,7 @@ def main():
 
     if ARGS.load_model:
         model.load_state_dict(torch.load(model_path))
-    
+
     if ARGS.validate_model:
         valid_loss = calculate_loss(ngrams_valid, vocab, model, loss_function)
         print(f'validation_loss: {valid_loss:.2f}')
@@ -208,17 +207,23 @@ def main():
         for i in range(20):
             print(generate_sentence(model, vocab))
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-                    prog = 'pgbot',
-                    description = 'Attempted bot based on Paul Graham essays.')
-    parser.add_argument('--fetch_essay_pages', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--write_to_files', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--load_essay_pages', action=argparse.BooleanOptionalAction)
+        prog='pgbot',
+        description='Attempted bot based on Paul Graham essays.')
+    parser.add_argument('--fetch_essay_pages',
+                        action=argparse.BooleanOptionalAction)
+    parser.add_argument('--write_to_files',
+                        action=argparse.BooleanOptionalAction)
+    parser.add_argument('--load_essay_pages',
+                        action=argparse.BooleanOptionalAction)
     parser.add_argument('--train_model', action=argparse.BooleanOptionalAction)
     parser.add_argument('--load_model', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--validate_model', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--generate_sentence', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--validate_model',
+                        action=argparse.BooleanOptionalAction)
+    parser.add_argument('--generate_sentence',
+                        action=argparse.BooleanOptionalAction)
     parser.add_argument('--model_name', default='ngram-model')
     ARGS = parser.parse_args()
 
