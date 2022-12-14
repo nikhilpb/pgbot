@@ -22,7 +22,7 @@ MAX_TOKENS = 2000
 EMBED_SIZE = 10
 HIDDEN_LAYER_SIZE = 128
 CONTEXT_SIZE = 3
-EPOCHS = 10
+EPOCHS = 1
 
 START = '<start>'
 END = '<end>'
@@ -158,10 +158,10 @@ def calculate_loss(ngrams, vocab, model, loss_function):
 
 def generate_sentence(model, vocab, max_length=50):
     sentence = []
-    input = [START, START, START]
+    input = [START] * CONTEXT_SIZE
     nt = ''
     while (len(sentence) < max_length) and (nt != END):    
-        indexes = torch.tensor(vocab(input), dtype=torch.long).view(1, 3)
+        indexes = torch.tensor(vocab(input), dtype=torch.long).view(1, CONTEXT_SIZE)
         log_probs = model(indexes)
         d = torch.distributions.categorical.Categorical(logits=log_probs)
         ind = 0
@@ -191,7 +191,7 @@ def main():
     loss_function = nn.NLLLoss()
     model = NGramLanguageModeler(len(vocab), EMBED_SIZE, CONTEXT_SIZE)
     optimizer = optim.SGD(model.parameters(), lr=0.1)
-    model_path = 'models/ngram-model'
+    model_path = 'models/' + ARGS.model_name
 
     if ARGS.train_model:
         _train_model(ngrams_train, vocab, model, loss_function, optimizer)
@@ -219,6 +219,7 @@ if __name__ == "__main__":
     parser.add_argument('--load_model', action=argparse.BooleanOptionalAction)
     parser.add_argument('--validate_model', action=argparse.BooleanOptionalAction)
     parser.add_argument('--generate_sentence', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--model_name', default='ngram-model')
     ARGS = parser.parse_args()
 
     main()
