@@ -3,8 +3,6 @@ import ngram_model
 import argparse
 from bs4 import BeautifulSoup as BS
 import numpy as np
-from os import listdir
-from os.path import isfile, join
 import requests
 from random import sample
 import re
