@@ -4,22 +4,29 @@ from os.path import isfile, join
 import re
 import requests
 import torch.utils.data as data
+from torchtext.vocab import build_vocab_from_iterator
 
 BASE_URL = 'http://www.paulgraham.com/'
 ARTICLES_URL = BASE_URL + 'articles.html'
+MAX_TOKENS = 2000
 PAGE_MIN_SIZE = 1000
+PAGES = 'pages/'
+
+START = '<start>'
+END = '<end>'
+UNK = '<unk>'
 
 
-class PGEssays(data.Dataset):
+class PGEssaysNgrams(data.Dataset):
 
     def __load_from_path(self):
-        all_pages = []
+        essays = []
         for p in listdir(self.pages_path):
             path = join(self.pages_path, p)
-        if isfile(path):
-            with open(path, 'r') as f:
-                all_pages.append(f.read())
-        return all_pages
+            if isfile(path):
+                with open(path, 'r') as f:
+                    essays.append(f.read())
+        return essays
 
     def __fetch_from_web(self):
         response = requests.get(ARTICLES_URL)
@@ -64,24 +71,50 @@ class PGEssays(data.Dataset):
                 count = count + 1
         return all_pages
 
-    def __init__(self, path, load_from_path=True, fetch_from_web=False):
+    def __yield_tokens(self, essays):
+        for e in essays:
+            for s in e.split('\n'):
+                yield s.split()
+
+    def __tokensize(self, sentence):
+        tokens = [START, START, START]
+        tokens.extend(sentence.split())
+        tokens.append(END)
+        return tokens
+
+    def __make_ngrams(self, tokens):
+        return [([tokens[i - j - 1] for j in range(self.context_size)], tokens[i]) for i in range(self.context_size, len(tokens))]
+
+    def __init__(self, path, load_from_path=True, fetch_from_web=False, context_size=3):
         super().__init__()
         if (not load_from_path) and (not fetch_from_web):
             raise Exception(
                 'load_from_path and fetch_from_web cannot both be false.')
         self.essays = []
         self.pages_path = path
+        self.context_size = context_size
         if load_from_path:
             self.essays = self.__load_from_path()
         else:
             self.essays = self.__fetch_from_web()
+        self.vocab = build_vocab_from_iterator(
+            self.__yield_tokens(self.essays),
+            max_tokens=MAX_TOKENS,
+            specials=[UNK, START, END])
+        self.vocab.set_default_index(0)
+        sentances = [s for p in self.essays for s in p.split(
+            '\n') if len(s.split(' ')) > self.context_size]
+        tokenized_sentences = [self.__tokensize(s) for s in sentances]
+        self.ngrams = [self.__make_ngrams(ts) for ts in tokenized_sentences]
+        print(f'Essays size: {len(self.essays)}')
+        print(f'Ngram size: {len(self.ngrams)}')
 
     def __len__(self):
-        return len(self.essays)
+        return len(self.ngrams)
 
     def __getitem__(self, index):
-        return self.essays[index]
+        return self.ngrams[index]
 
 
 if __name__ == '__main__':
-    pgessays = PGEssays('pages')
+    pgessays = PGEssaysNgrams('pages')
