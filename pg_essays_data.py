@@ -43,7 +43,7 @@ class PGEssaysNgrams(data.Dataset):
         success = 0
         failure = 0
         finished_requests = 0
-        all_pages = []
+        essays = []
         total_requests = len(all_links)
         for link in all_links:
             finished_requests = finished_requests + 1
@@ -60,16 +60,17 @@ class PGEssaysNgrams(data.Dataset):
                 pg_text = re.sub('\.', '.\n', pg_text)
                 if len(pg_text) < PAGE_MIN_SIZE:
                     continue
-                all_pages.append(pg_text)
+                essays.append(pg_text)
             else:
                 failure = failure + 1
         print(f'total_success: {success}, total_failure: {failure}')
+        return essays
+
+    def __write_essays(self, essays):
         count = 1
-        for p in all_pages:
+        for e in essays:
             with open(PAGES + 'page-' + str(count) + '.txt', 'w') as f:
-                f.write(p)
-                count = count + 1
-        return all_pages
+                f.write(e)
 
     def __yield_tokens(self, essays):
         for e in essays:
@@ -97,6 +98,7 @@ class PGEssaysNgrams(data.Dataset):
             self.essays = self.__load_from_path()
         else:
             self.essays = self.__fetch_from_web()
+            self.__write_essays(self.essays)
         self.vocab = build_vocab_from_iterator(
             self.__yield_tokens(self.essays),
             max_tokens=MAX_TOKENS,
@@ -117,4 +119,4 @@ class PGEssaysNgrams(data.Dataset):
 
 
 if __name__ == '__main__':
-    pgessays = PGEssaysNgrams('pages')
+    pgessays = PGEssaysNgrams('pages', load_from_path=False, fetch_from_web=True)
