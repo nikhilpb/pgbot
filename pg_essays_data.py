@@ -119,4 +119,5 @@ class PGEssaysNgrams(data.Dataset):
 
 
 if __name__ == '__main__':
-    pgessays = PGEssaysNgrams('pages', load_from_path=False, fetch_from_web=True)
+    pgessays = PGEssaysNgrams(
+        'pages', load_from_path=False, fetch_from_web=True)
